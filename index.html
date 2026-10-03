@@ -27,7 +27,27 @@
       </div>
       <div id="result" aria-live="polite"></div>
     </section>
-    <section id="notebook-view" hidden><div class="view-heading"><p class="section-kicker">生词本</p><h1>这些词，还没混熟。</h1><p class="intro">你点过“不会”或“收藏”的词都在这里。熟了就标熟，留不留随你。</p></div><div class="notebook-summary"><span class="summary-number" id="notebook-total">0</span><span class="summary-copy">个词在口袋里<br><small>只存你主动保存的词</small></span></div><div class="toolbar"><input id="filter" placeholder="原形、查询词或中文释义" aria-label="搜索生词本"><button id="export">导出 JSON ↗</button></div><div id="notebook"></div></section>
+    <section id="notebook-view" hidden>
+      <div class="view-heading"><p class="section-kicker">生词本</p><h1>这些词，还没混熟。</h1><p class="intro">你点过“不会”或“收藏”的词都在这里。按词性分好堆，熟了就标熟。</p></div>
+      <div class="notebook-summary"><span class="summary-number" id="notebook-total">0</span><span class="summary-copy">个词在口袋里<br><small>只存你主动保存的词</small></span></div>
+      <div class="toolbar">
+        <input id="filter" type="search" placeholder="原形、查询词或中文释义" aria-label="搜索生词本">
+        <label class="notebook-pos-filter">词性
+          <select id="part-of-speech-filter" aria-label="按词性筛选生词本">
+            <option value="all">全部词性</option>
+            <option value="noun">名词</option><option value="verb">动词</option>
+            <option value="adjective">形容词</option><option value="adverb">副词</option>
+            <option value="pronoun">代词</option><option value="determiner">限定词</option>
+            <option value="preposition">介词</option><option value="conjunction">连词</option>
+            <option value="interjection">感叹词</option><option value="phrase">短语</option>
+            <option value="other">其他 / 未分类</option>
+          </select>
+        </label>
+        <button id="export">导出 JSON ↗</button>
+      </div>
+      <p id="notebook-match-count" class="notebook-match-count" aria-live="polite" aria-atomic="true"></p>
+      <div id="notebook"></div>
+    </section>
     <section id="settings-view" hidden>
       <p class="section-kicker">设置</p><h1>后台接线处</h1>
       <p class="intro">选择你的接口与数据位置。密钥默认仅本次使用，也可主动保存到本机后台。</p>

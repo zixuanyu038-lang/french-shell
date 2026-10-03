@@ -1,0 +1,9 @@
+{
+  "name": "french-shell",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "node server.mjs", "test": "node --test" },
+  "engines": { "node": ">=20" }
+}

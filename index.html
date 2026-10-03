@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#2858d9"><title>D指导法语 · French Shell</title><link rel="stylesheet" href="/src/style.css"></head>
+<body class="app-shell">
+  <header class="sidebar">
+    <a class="brand" href="/" aria-label="D指导法语首页"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48" width="40" height="40"><path d="M6 27c0-11 8-18 19-17 7 0 12 5 12 12 4 1 5-1 7-3 0 6-3 9-7 9-3 9-9 12-18 10C11 37 6 33 6 27Z" fill="currentColor"/><circle cx="15" cy="23" r="2" fill="#fff"/><path d="M16 31c5 2 10 1 13-2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></span><span class="brand-copy">D指导法语<small>French Shell</small></span></a>
+    <nav aria-label="主要导航"><span class="nav-label">常用</span><button data-view="search" class="active"><span class="nav-number" aria-hidden="true">01</span>查词<span aria-hidden="true">↗</span></button><button data-view="notebook"><span class="nav-number" aria-hidden="true">02</span>生词本 <span id="count">0</span></button><button data-view="settings"><span class="nav-number" aria-hidden="true">03</span>设置<span aria-hidden="true">⚙</span></button></nav>
+    <div class="sidebar-bottom"><div class="sidebar-language"><span class="french-flag" aria-hidden="true"></span><span>Français → 中文</span></div><p class="sidebar-footnote">不会的词留下。<br>其他的，查完就走。</p><span class="badge">本地词库 · 自带接口</span></div>
+  </header>
+  <main class="workspace">
+    <div class="workspace-topbar"><span class="breadcrumb">French Shell <span aria-hidden="true">/</span> <span id="view-label">查词</span></span><span class="local-status"><i aria-hidden="true"></i>本机运行</span></div>
+    <section id="search-view">
+      <div class="search-layout">
+        <div class="lookup-desk">
+          <p class="section-kicker">查词</p>
+          <h1 class="desk-title">不会？问 <span>D指导</span>。</h1>
+          <p class="desk-description">单词、变位、拼不准的词，都可以试着查。</p>
+          <form id="search-form"><span class="search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m15 15 5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span><label class="sr-only" for="query">法语单词或短语</label><input id="query" placeholder="单词、变位，拼不准也试试…" autocomplete="off" required maxlength="200"><button class="primary" type="submit">查词 <span aria-hidden="true">↗</span></button></form>
+          <div class="suggestions"><span>试试</span><button data-query="mangeais">mangeais</button><button data-query="maison">maison</button><button data-query="heureuse">heureuse</button><button data-query="bonjure">bonjure</button><button data-query="sall">sall</button></div>
+          <p id="mode-note" class="demo-note">正在加载本地设置…</p>
+          <div id="query-status" role="status" hidden><span id="query-progress">正在查词…</span> <button id="cancel-query" type="button">取消</button></div>
+          <p id="query-error" class="query-error" role="alert" hidden></p>
+          <div class="lookup-guides" id="lookup-guides"><div class="lookup-guide"><span class="guide-number" aria-hidden="true">↳</span><div class="guide-copy"><strong>拼写和变位都能查</strong><p>bonjure → bonjour；mangeais → manger。</p></div></div><div class="lookup-guide"><span class="guide-number" aria-hidden="true">＋</span><div class="guide-copy"><strong>查完再决定存不存</strong><p>点“不会”或“收藏”才保存，不记查询历史。</p></div></div></div>
+          <div class="desk-footer"><span>单词 / 变位 / 短语</span><span>只存你选中的词</span></div>
+        </div>
+        <aside class="companion" aria-label="D指导"><div class="companion-top"><span class="companion-label">D指导</span><span class="companion-badge">非官方同人</span><button id="mascot-collapse" type="button" aria-expanded="true">收起</button></div><div class="mascot-stage"><div id="mascot-sprite" class="mascot-sprite" role="img" aria-label="D指导" hidden></div><p id="mascot-unavailable" hidden>角色素材没加载出来。<br>查词照常用。</p></div><div class="fish-dialogue"><span id="fish-caption">D指导说</span><p id="fish-message" aria-live="polite">卡哪个词了？丢过来看看。</p><button id="mascot-nudge" type="button">戳一下</button><span id="mascot-action-status" class="mascot-action-status"></span></div></aside>
+      </div>
+      <div id="result" aria-live="polite"></div>
+    </section>
+    <section id="notebook-view" hidden><div class="view-heading"><p class="section-kicker">生词本</p><h1>这些词，还没混熟。</h1><p class="intro">你点过“不会”或“收藏”的词都在这里。熟了就标熟，留不留随你。</p></div><div class="notebook-summary"><span class="summary-number" id="notebook-total">0</span><span class="summary-copy">个词在口袋里<br><small>只存你主动保存的词</small></span></div><div class="toolbar"><input id="filter" placeholder="原形、查询词或中文释义" aria-label="搜索生词本"><button id="export">导出 JSON ↗</button></div><div id="notebook"></div></section>
+    <section id="settings-view" hidden>
+      <p class="section-kicker">设置</p><h1>后台接线处</h1>
+      <p class="intro">选择你的接口与数据位置。密钥默认仅本次使用，也可主动保存到本机后台。</p>
+      <div class="settings-links"><a href="#settings-form">查词接口</a><a href="#tts-form">朗读设置</a><a href="#mascot-settings">D指导</a><a href="#data-settings">数据与存储</a></div>
+      <form id="settings-form" class="card settings-form"><h2>查词接口</h2>
+        <label>查询模式<select id="lookup-mode"><option value="demo">演示模式（无需 Key）</option><option value="live">真实 API 查词</option></select></label>
+        <label>接口类型<select id="provider"><option value="deepseek">DeepSeek（关闭思考）</option><option value="compatible">OpenAI 兼容接口</option></select></label>
+        <label>服务地址<input id="base-url" type="url" required placeholder="https://…"></label>
+        <label>模型名<input id="model" required maxlength="120" placeholder="填写服务商的模型 ID"></label>
+        <label>API Key<input id="api-key" type="password" autocomplete="off" placeholder="已保存时可留空；更换接口需重新填写" maxlength="4096"></label>
+        <label class="check-row"><input id="api-remember" type="checkbox">记住本次填写的密钥，并绑定当前接口地址</label>
+        <p id="api-saved" class="demo-note">正在检查本机密钥状态…</p><button id="api-delete" type="button" disabled>删除已保存的查词密钥</button>
+        <p class="demo-note">支持 /chat/completions 与 JSON 输出。主动保存的 Key 写入本机后台私有配置（明文，不是加密），不回显、不进入词库或备份。改变地址或接口类型需重新确认密钥。接口类型决定参数兼容方式。</p>
+        <button class="primary" type="submit">应用查词设置</button><p id="settings-status" role="status"></p>
+      </form>
+    </section>
+    <section id="tts-settings" hidden>
+      <form id="tts-form" class="card settings-form"><h2>朗读设置</h2>
+        <label class="check-row"><input id="tts-enabled" type="checkbox">启用 TTS（实验功能）</label>
+        <p class="demo-note">当前适配阿里云 Qwen HTTP 流式 TTS。音频质量待验证，默认关闭；其他供应商后续以适配器接入。</p>
+        <label>语音接口地址<input id="tts-endpoint" type="url" required></label>
+        <label>语音模型<input id="tts-model" required maxlength="120"></label>
+        <label>语言<select id="tts-language"><option value="French">法语</option><option value="English">英语</option><option value="Chinese">中文</option></select></label>
+        <label>TTS API Key<input id="tts-key" type="password" autocomplete="off" placeholder="已保存时可留空；更换接口需重新填写" maxlength="4096"></label>
+        <label class="check-row"><input id="tts-remember" type="checkbox">记住本次填写的密钥，并绑定当前语音接口地址</label>
+        <p id="tts-saved" class="demo-note">正在检查本机密钥状态…</p><button id="tts-delete" type="button" disabled>删除已保存的 TTS 密钥</button>
+        <label>音色名<input id="tts-voice" value="Cherry" required pattern="[a-zA-Z][a-zA-Z0-9_-]{0,79}" maxlength="80"></label>
+        <p class="demo-note">使用模型支持的音色名。每次朗读重新调用 API，音频不落盘。主动保存的 Key 仅写入后台私有配置（明文），不进入词库或导出。单次最多 500 字符。</p>
+        <button class="primary" type="submit">应用 TTS 设置</button> <button id="tts-preview" type="button">试听 Bonjour</button>
+        <p id="tts-settings-status" role="status">启用、填写 Key 并应用后即可试听。</p>
+      </form>
+    </section>
+    <section id="mascot-settings" hidden><div class="card settings-form"><h2>D指导</h2>
+      <label class="check-row"><input id="mascot-visible" type="checkbox" checked>显示 D指导</label>
+      <p class="demo-note">查词时换姿态，戳一下打招呼。</p>
+      <button id="mascot-apply" type="button" class="primary">应用角色设置</button><p id="mascot-settings-status" role="status"></p>
+    </div></section>
+    <section id="data-settings" hidden><div class="card settings-form"><h2>数据与存储</h2>
+      <p id="storage-status" role="status">正在检查本地词库…</p>
+      <p class="demo-note">默认保存在当前浏览器。支持文件选择的浏览器可把词库连接到自己选择位置的 JSON 文件，保存单词时自动更新。浏览器只提供文件名，不暴露完整磁盘路径。</p>
+      <div class="setting-actions"><button id="use-browser" type="button">使用浏览器词库</button><button id="create-file" type="button">新建数据文件（复制当前词库）</button><button id="open-file" type="button">打开已有词库</button><button id="reconnect-file" type="button">重新连接文件</button></div>
+      <p id="file-support" class="demo-note"></p>
+      <div class="setting-actions"><button id="data-export" type="button">导出备份</button><label class="import-label">导入 JSON 备份<input id="import-file" type="file" accept=".json,application/json"></label><button id="retry-storage" type="button">重试读取</button></div>
+      <p class="demo-note">切换存储不会删除旧词库，也不会自动合并；可通过导出/导入迁移。导入按原形与词性合并，保留较新的记录。刷新后文件权限若失效，点击重新连接即可。</p>
+    </div></section>
+    <footer class="workspace-footer"><span>D指导法语 <span aria-hidden="true">·</span> French Shell</span><span>非官方同人 · 作者：YunYueSama · <a id="mascot-source" href="https://github.com/YunYueSama/codex-deepseek-pet" target="_blank" rel="noopener noreferrer">角色来源 ↗</a></span></footer>
+  </main>
+  <aside id="speech-bar" hidden><span id="speech-status" role="status"></span><button id="stop-speech" type="button" hidden>停止</button></aside>
+  <button id="selection-speech" hidden>朗读选中的法语 ↗</button>
+  <div id="toast" role="status" hidden></div>
+  <script type="module" src="/src/app.js"></script>
+</body></html>

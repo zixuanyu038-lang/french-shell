@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>D指导素材检查（开发页）</title>
+<style>body{font:16px system-ui;margin:24px;background:#f6f7f9;color:#182c50}h1{font-size:24px}label{display:inline-block;margin:0 20px 14px 0}select{font:inherit;padding:8px}#frames{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px}.frame{border:1px solid #cbd3df;padding:12px;background:#fff}.art{width:160px;max-width:100%;margin:auto;background-repeat:no-repeat}.frame p{font-size:13px;overflow-wrap:anywhere}.art img{display:block;width:100%;height:auto}#source{font-size:14px;overflow-wrap:anywhere}</style></head>
+<body><h1>D指导素材检查</h1><p>仅在开发时打开：逐格显示原图，不调用任何 API，不记录数据；本页会加载所选图集，不是应用启动预取。</p>
+<label>状态 <select id="pose"></select></label><p id="source"></p><div id="frames"></div>
+<script type="module" src="/src/dev/mascot-audit.js"></script></body></html>

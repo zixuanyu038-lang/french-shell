@@ -1,10 +1,12 @@
 import { entryKey } from './entries.js';
 import { lookupDemoResult, validateLookupResult } from './lookup.js';
 import { lookupMarkup, lookupCandidate } from './lookup-view.js';
+import { partOfSpeechLabels as names, notebookView, notebookMarkup } from './notebook.js';
 import { allWords, saveWord, removeWord, storageInfo, chooseDataFile, reconnectDataFile, useBrowserStorage, importWords, fileStorageSupported, closeStorage } from './storage.js';
 import { SpeechPlayer } from './speech.js';
 import { lookupDefaults, speechDefaults, loadSettings, saveSettings } from './settings.js';
 import { Mascot } from './mascot.js';
+import { readLines } from './stream.js';
 
 const $ = selector => document.querySelector(selector);
 let settingsStorage;
@@ -89,7 +91,6 @@ $('#tts-form').addEventListener('submit', async event => {
 });
 function speak(text) { if (!ttsConfig.enabled) { toast('朗读默认关闭，请在设置中启用。'); return; } if (!ttsConfig.apiKey && !hasSaved('speech', ttsConfig)) { toast('此语音接口未保存密钥，请在设置填写并应用。'); return; } player.play(text, ttsConfig); }
 $('#tts-preview').addEventListener('click', () => speak('Bonjour'));
-const names = { noun: '名词', verb: '动词', adjective: '形容词', adverb: '副词', phrase: '短语', preposition: '介词', conjunction: '连词', pronoun: '代词', determiner: '限定词', interjection: '感叹词' };
 const escape = value => String(value ?? '').replace(/[&<>"']/g, x => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[x]));
 let currentEntry;
 let currentLookup;
@@ -117,7 +118,7 @@ function updateAttribution(entry) {
 function renderRequestInfo(d) {
   if (d) {
     const panel = document.createElement('details'); panel.className = 'request-info';
-    panel.innerHTML = `<summary>${escape(d.requestedModel)} · ${d.thinking === 'disabled' ? '非思考' : '供应商默认模式'} · 总耗时 ${(d.totalMs / 1000).toFixed(2)} 秒</summary><p>请求模型：${escape(d.requestedModel)}<br>服务返回模型：${escape(d.returnedModel || '服务未提供')}<br>接口耗时：${(d.upstreamMs / 1000).toFixed(2)} 秒（含网络、生成、校验及重试）<br>端到端耗时：${(d.totalMs / 1000).toFixed(2)} 秒<br>调用次数：${d.attempts}${d.outputTokens === null ? '' : `<br>最后一次输出 tokens：${d.outputTokens}`}<br>当前整条 JSON 返回后显示；不是首字延迟。</p>`;
+    panel.innerHTML = `<summary>${escape(d.requestedModel)} · ${d.thinking === 'disabled' ? '非思考' : '供应商默认模式'} · 总耗时 ${(d.totalMs / 1000).toFixed(2)} 秒</summary><p>请求模型：${escape(d.requestedModel)}<br>服务返回模型：${escape(d.returnedModel || '服务未提供')}${d.firstDeltaMs === null || d.firstDeltaMs === undefined ? '' : `<br>首字到达：${(d.firstDeltaMs / 1000).toFixed(2)} 秒`}<br>接口耗时：${(d.upstreamMs / 1000).toFixed(2)} 秒（含网络、生成、校验及重试）<br>端到端耗时：${(d.totalMs / 1000).toFixed(2)} 秒<br>调用次数：${d.attempts}${d.outputTokens === null ? '' : `<br>最后一次输出 tokens：${d.outputTokens}`}<br>生成过程实时显示在进度条；词卡仍等整条 JSON 校验通过后一次渲染。</p>`;
     $('#result').append(panel);
   }
 }
@@ -143,11 +144,13 @@ function renderLookup(result) {
   renderRequestInfo(result.diagnostics);
 }
 function renderNotebook() {
-  const filter = $('#filter').value.trim().toLocaleLowerCase();
-  const visible = words.filter(word => [word.entry.lemma, word.entry.query, ...word.entry.definitions].join(' ').toLocaleLowerCase().includes(filter));
-  $('#count').textContent = words.length;
-  $('#notebook-total').textContent = words.length;
-  $('#notebook').innerHTML = visible.length ? visible.map(word => `<article class="saved-card"><div><button class="saved-title" data-open="${escape(word.id)}" lang="fr">${escape(word.entry.lemma)}</button> <span class="tag">${escape(names[word.entry.partOfSpeech] || word.entry.partOfSpeech)}</span><p>${word.entry.definitions.map(escape).join('；')}</p><small>${word.unknown ? '待学习' : '已熟悉'}${word.favorite ? ' · 已收藏' : ''}</small></div><div><button data-toggle="${escape(word.id)}">${word.unknown ? '标为熟悉' : '标为不会'}</button><button data-delete="${escape(word.id)}">删除</button></div></article>`).join('') : `<div class="empty"><span aria-hidden="true">∅</span><p>${words.length ? '没搜到，换个词试试。' : '口袋还是空的。'}</p><small>${words.length ? '可搜法语原形、输入词或中文释义。' : '查词后点“不会”或“收藏”，D指导就帮你留着。'}</small></div>`;
+  const view = notebookView(words, { query: $('#filter').value, partOfSpeech: $('#part-of-speech-filter').value });
+  $('#count').textContent = view.totalCount;
+  $('#notebook-total').textContent = view.totalCount;
+  $('#notebook-match-count').textContent = view.isFiltered
+    ? `显示 ${view.visibleCount} / ${view.totalCount} 个词 · 每组按最近更新排序`
+    : '按词性分组 · 每组按最近更新排序';
+  $('#notebook').innerHTML = notebookMarkup(view);
 }
 async function refresh() {
   try {
@@ -181,16 +184,37 @@ async function search(query) {
   $('#lookup-guides').hidden = true;
   fishSays('收到，本鱼翻翻笔记。', '正在查词', 'thinking');
   $('#query-status').hidden = false; $('#search-form button').disabled = true;
-  const progress = () => { if (queryController === controller) $('#query-progress').textContent = `${config.mode === 'demo' ? '演示查询' : `${config.model} · ${config.provider === 'deepseek' ? '非思考' : '供应商默认模式'}`} · 已等待 ${((performance.now() - startedAt) / 1000).toFixed(1)} 秒`; };
+  const label = `${config.model} · ${config.provider === 'deepseek' ? '非思考' : '供应商默认模式'}`;
+  // While the model streams, show what has arrived; the timer only fills the gaps.
+  let streamNote = '';
+  let pending = '';
+  let earlyLemma;
+  const progress = () => { if (queryController === controller) $('#query-progress').textContent = streamNote || `${config.mode === 'demo' ? '演示查询' : label} · 已等待 ${((performance.now() - startedAt) / 1000).toFixed(1)} 秒`; };
   progress(); const progressTimer = setInterval(progress, 100);
   try {
     let result;
     if (config.mode === 'demo') result = await lookupDemoResult(query);
     else {
       const response = await fetch('/api/lookup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, config }), signal: controller.signal });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || '查询失败，请重试。');
-      validateLookupResult(data, query); result = data;
+      if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || '查询失败，请重试。'); }
+      for await (const line of readLines(response.body)) {
+        if (queryController !== controller) return;
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'error') throw new Error(event.error);
+        if (event.type === 'delta') {
+          // A partial frame is only a progress hint; the lemma is shown as plain text.
+          if (!earlyLemma) {
+            pending += event.text;
+            const found = pending.match(/"lemma"\s*:\s*"([^"]*)"/);
+            if (found) { earlyLemma = found[1].slice(0, 40); pending = ''; }
+          }
+          streamNote = `${label} · 已生成 ${event.received} 字符${earlyLemma ? ` · ${earlyLemma}` : ''}`;
+          progress();
+        } else if (event.type === 'result') result = event.result;
+      }
+      if (!result) throw new Error('查询未完成，请重试。');
+      validateLookupResult(result, query);
     }
     if (queryController !== controller || controller.signal.aborted) return;
     if (result.diagnostics) result.diagnostics.totalMs = Math.round(performance.now() - startedAt);
@@ -221,10 +245,15 @@ $('#settings-form').addEventListener('submit', async event => {
 });
 $('#search-form').addEventListener('submit', event => { event.preventDefault(); search($('#query').value); });
 $('#filter').addEventListener('input', renderNotebook);
+$('#part-of-speech-filter').addEventListener('change', renderNotebook);
 document.addEventListener('click', async event => {
   const button = event.target.closest('button'); if (!button) return;
   try {
     if (button.dataset.view) showView(button.dataset.view);
+    if (button.hasAttribute('data-clear-notebook-filters')) {
+      $('#filter').value = ''; $('#part-of-speech-filter').value = 'all';
+      renderNotebook(); $('#filter').focus();
+    }
     if (button.dataset.query) { $('#query').value = button.dataset.query; await search(button.dataset.query); }
     if (button.dataset.candidate !== undefined && currentLookup) chooseLookupCandidate(Number(button.dataset.candidate));
     if (button.dataset.save && currentEntry) {

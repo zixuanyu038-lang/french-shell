@@ -12,7 +12,6 @@ export const mascotStates = {
   idle:still(0),thinking:still(2),result:still(5),saved:still(15),error:still(9),
   cancelled:still(0),review:still(2),speaking:still(5),hello:wave,nudge:wave
 };
-export const mascotActions = {hello:'挥个手'};
 export function availableMascotActions() {return ['hello'];}
 export function mascotActionLabel(_skinName,state) {
   return {idle:'在岗',thinking:'查词中',result:'讲解',saved:'保存成功',error:'查询需要检查',cancelled:'已取消',review:'复习',speaking:'朗读中',hello:'挥个手',nudge:'挥个手'}[state] || '在岗';
@@ -23,7 +22,6 @@ export function posePosition(pose,frame=0) {
   const cell=pose.frames[index];
   return `${cell % pose.columns / (pose.columns-1) * 100}% ${Math.floor(cell / pose.columns) / (pose.rows-1) * 100}%`;
 }
-export function spritePosition(state,frame=0) {return posePosition(mascotPose('hd',state),frame);}
 export function normalizeMascotSettings(settings={}) {
   const next={...mascotDefaults};
   for(const key of ['enabled','motion','collapsed']) if(typeof settings[key]==='boolean') next[key]=settings[key];

@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { lookupRemote, LookupError } from './provider.mjs';
+import { lookupRemoteStream, LookupError } from './provider.mjs';
 import { speechStream } from './tts.mjs';
 import { createCredentialStore, defaultCredentialFile } from './credentials.mjs';
 
@@ -45,30 +45,34 @@ export function createAppServer({ fetchImpl, credentialFile = process.env.FRENCH
         catch (error) { send(error instanceof LookupError ? error.status : 500, { error: error instanceof LookupError ? error.message : '无法读取密钥。' }); return; }
         const controller = new AbortController();
         res.on('close', () => { if (!res.writableEnded) controller.abort(); });
-        if (pathname === '/api/speech') {
-          const write = async event => {
-            if (controller.signal.aborted) throw new Error('cancelled');
-            if (!res.headersSent) res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
-            if (!res.write(JSON.stringify(event) + '\n')) await new Promise((resolve, reject) => {
-              const clean = () => { res.off('drain', drain); res.off('close', close); };
-              const drain = () => { clean(); resolve(); };
-              const close = () => { clean(); reject(new Error('cancelled')); };
-              res.once('drain', drain); res.once('close', close);
-            });
-          };
+        const write = async event => {
+          if (controller.signal.aborted) throw new Error('cancelled');
+          if (!res.headersSent) res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+          if (!res.write(JSON.stringify(event) + '\n')) await new Promise((resolve, reject) => {
+            const clean = () => { res.off('drain', drain); res.off('close', close); };
+            const drain = () => { clean(); resolve(); };
+            const close = () => { clean(); reject(new Error('cancelled')); };
+            res.once('drain', drain); res.once('close', close);
+          });
+        };
+        // Both endpoints stream NDJSON, so an error after the first chunk can no
+        // longer change the status code and has to arrive as a terminal event.
+        const stream = async (source, fallback) => {
           try {
-            for await (const event of speechStream(data?.text, data?.config, { fetchImpl, signal: controller.signal })) await write(event);
+            for await (const event of source) await write(event);
             res.end();
           } catch (error) {
             if (controller.signal.aborted) return;
-            const message = error instanceof LookupError ? error.message : '语音播放失败，请重试。';
+            const message = error instanceof LookupError ? error.message : fallback;
             if (res.headersSent) { res.end(JSON.stringify({ type: 'error', error: message }) + '\n'); }
             else send(error instanceof LookupError ? error.status : 500, { error: message });
           }
+        };
+        if (pathname === '/api/speech') {
+          await stream(speechStream(data?.text, data?.config, { fetchImpl, signal: controller.signal }), '语音播放失败，请重试。');
           return;
         }
-        try { send(200, await lookupRemote(data?.query, data?.config, { fetchImpl, signal: controller.signal })); }
-        catch (error) { send(error instanceof LookupError ? error.status : 500, { error: error instanceof LookupError ? error.message : '查询失败，请重试。' }); }
+        await stream(lookupRemoteStream(data?.query, data?.config, { fetchImpl, signal: controller.signal }), '查询失败，请重试。');
         return;
       }
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }

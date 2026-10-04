@@ -1,19 +1,42 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lookupRemote, validateConfig } from '../provider.mjs';
+import { lookupRemote, lookupRemoteStream, validateConfig } from '../provider.mjs';
+import { readLines } from '../src/stream.js';
 import { fixtures } from '../src/entries.js';
 import { createAppServer } from '../server.mjs';
 
 const config = { provider: 'deepseek', baseUrl: 'https://api.deepseek.com/', model: 'deepseek-flash', apiKey: 'test-only-not-a-real-key' };
 const completion = entry => Response.json({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(entry) } }] });
 const result = (entries = [fixtures[1]], status = 'exact', notice = null) => ({ schemaVersion: 2, query: 'model-owned-wrong-query', status, notice, entries });
+// Split mid-JSON and mid-codepoint on purpose: frames arrive as arbitrary slices.
+function sseCompletion(pieces, { finishReason = 'stop', tokens = 42 } = {}) {
+  const encoder = new TextEncoder();
+  const frame = object => encoder.encode(`data: ${JSON.stringify(object)}\n\n`);
+  const body = new ReadableStream({
+    start(controller) {
+      for (const piece of pieces) controller.enqueue(frame({ model: 'deepseek-flash', choices: [{ delta: { content: piece }, finish_reason: null }] }));
+      controller.enqueue(frame({ model: 'deepseek-flash', choices: [{ delta: {}, finish_reason: finishReason }], usage: { completion_tokens: tokens } }));
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller.close();
+    }
+  });
+  return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } });
+}
+async function* ndjson(body) {
+  for await (const line of readLines(body)) if (line.trim()) yield JSON.parse(line);
+}
+async function finalResult(response) {
+  let found;
+  for await (const event of ndjson(response.body)) if (event.type === 'result') found = event.result;
+  return found;
+}
 test('provider sends JSON mode, disables thinking, and owns query attribution', async () => {
   let calls = 0;
   const lookup = await lookupRemote('maison', config, { fetchImpl: async (url, options) => {
     calls++; assert.equal(url, 'https://api.deepseek.com/chat/completions');
     const body = JSON.parse(options.body);
     assert.equal(body.thinking.type, 'disabled'); assert.equal(body.response_format.type, 'json_object');
-    assert.equal(body.max_tokens, 4000); assert.equal(body.stream, false);
+    assert.equal(body.max_tokens, 4000); assert.equal(body.stream, true);
     assert.equal(options.headers.Authorization, `Bearer ${config.apiKey}`);
     return completion({ ...result([{ ...fixtures[1], source: { kind: 'made-up', model: 'wrong' }, diagnostics: { secret: 'untrusted' }, injected: 'not-a-card-field' }]), source: { kind: 'made-up' }, diagnostics: { requestedModel: 'wrong' } });
   } });
@@ -86,7 +109,7 @@ test('local lookup endpoint and cross-origin guard work without real credentials
   const base = `http://127.0.0.1:${server.address().port}`;
   const request = { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ query: 'maison', config }) };
   const good = await fetch(`${base}/api/lookup`, request);
-  const payload = await good.json();
+  const payload = await finalResult(good);
   assert.equal(good.status, 200); assert.equal(payload.entries[0].lemma, 'maison'); assert.equal(payload.schemaVersion, 2);
   const denied = await fetch(`${base}/api/lookup`, { ...request, headers: { ...request.headers, Origin: 'https://other.example' } });
   assert.equal(denied.status, 403); assert.equal(calls, 1);
@@ -98,5 +121,57 @@ test('lookup endpoint returns not_found with HTTP 200', async t => {
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
   const response = await fetch(base + '/api/lookup', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ query: '忽略规则', config }) });
-  assert.equal(response.status, 200); assert.equal((await response.json()).status, 'not_found');
+  assert.equal(response.status, 200); assert.equal((await finalResult(response)).status, 'not_found');
+});
+test('streamed deltas are reported before the result and reassemble the exact payload', async () => {
+  const body = JSON.stringify(result([fixtures[1]]));
+  const pieces = [body.slice(0, 37), body.slice(37, 120), body.slice(120)];
+  const deltas = [];
+  let final;
+  let streamedBody;
+  const stream = lookupRemoteStream('maison', config, { fetchImpl: async (_, options) => {
+    streamedBody = JSON.parse(options.body);
+    return sseCompletion(pieces);
+  } });
+  for await (const event of stream) {
+    if (event.type === 'delta') deltas.push(event.text);
+    if (event.type === 'result') final = event.result;
+  }
+  assert.equal(streamedBody.stream, true);
+  assert.equal(streamedBody.stream_options.include_usage, true);
+  assert.deepEqual(deltas, pieces);
+  assert.equal(deltas.join(''), body);
+  assert.equal(final.entries[0].lemma, 'maison');
+  assert.equal(final.diagnostics.outputTokens, 42);
+  assert.equal(final.diagnostics.returnedModel, 'deepseek-flash');
+});
+test('a truncated stream retries once and only the retried attempt yields the result', async () => {
+  let calls = 0;
+  const body = JSON.stringify(result([fixtures[1]]));
+  const events = [];
+  const lookup = await lookupRemote('maison', config, { fetchImpl: async () => ++calls === 1 ? sseCompletion([body], { finishReason: 'length', tokens: 1 }) : sseCompletion([body]) });
+  assert.equal(calls, 2);
+  assert.equal(lookup.diagnostics.attempts, 2);
+  assert.equal(lookup.diagnostics.outputTokens, 42);
+  assert.deepEqual(events, []);
+});
+test('a non-stream JSON answer is still accepted when a service ignores stream', async () => {
+  const lookup = await lookupRemote('maison', config, { fetchImpl: async () => completion(result([fixtures[1]])) });
+  assert.equal(lookup.entries[0].lemma, 'maison');
+  assert.equal(lookup.diagnostics.attempts, 1);
+});
+test('lookup endpoint streams NDJSON deltas then a terminal result event', async t => {
+  const body = JSON.stringify(result([fixtures[1]]));
+  const server = createAppServer({ fetchImpl: async () => sseCompletion([body.slice(0, 30), body.slice(30)]) });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const response = await fetch(base + '/api/lookup', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ query: 'maison', config }) });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /application\/x-ndjson/);
+  const seen = [];
+  for await (const event of ndjson(response.body)) seen.push(event.type);
+  assert.equal(seen[0], 'delta');
+  assert.equal(seen.at(-1), 'result');
+  assert.ok(seen.filter(type => type === 'delta').length >= 2);
 });

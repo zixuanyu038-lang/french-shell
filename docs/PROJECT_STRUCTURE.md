@@ -17,6 +17,7 @@ french-shell/
 │  ├─ entries.js               通用词条结构、校验、离线演示词卡
 │  ├─ lookup.js                查词响应版本 2、纠错/候选校验与演示
 │  ├─ lookup-view.js           纠错提示与候选摘要的安全渲染
+│  ├─ notebook.js              生词本词性分组、组合筛选与安全渲染
 │  ├─ settings.js              非敏感配置预设与持久化字段白名单
 │  ├─ storage.js               IndexedDB / 用户 JSON 文件、导入导出
 │  ├─ speech.js                Web Audio 播放、停止、取消与状态
@@ -33,6 +34,7 @@ french-shell/
 │  ├─ entries.test.js          词条与静态资源隔离
 │  ├─ lookup.test.js           查词状态、数量约束、拼写与候选契约
 │  ├─ lookup-view.test.js      纠错/候选显示、选择与 HTML 转义
+│  ├─ notebook.test.js         词性分组/筛选、旧备份兼容与 HTML 转义
 │  ├─ provider.test.js         请求参数、结构重试、错误与来源
 │  ├─ tts.test.js              TTS / SSE / PCM / NDJSON
 │  ├─ speech-player.test.js    播放调度、取消和后台保存密钥路径
@@ -64,8 +66,10 @@ french-shell/
       → app.js
       → POST /api/lookup
       → 后台按接口地址解析密钥
-      → provider.mjs 调用 LLM
-      → lookup.js / entries.js 校验响应与词条
+      → provider.mjs 以 stream 方式调用 LLM
+      → 后台边收边转成 NDJSON（delta 事件）
+      → 收齐后 lookup.js / entries.js 校验整条 JSON 与词条
+      → 后台发出 result 事件
       → 页面显示纠正提示或候选
       → 单条直接显示词卡；多条由用户选择展开
       → 只有点“不会/收藏”才交给 storage.js 保存
@@ -107,13 +111,15 @@ french-shell/
 
 ### POST /api/lookup
 
-请求包含 query 和 config（provider、baseUrl、model、可选 apiKey）。临时 Key 优先；为空时后台寻找对应接口已保存的 Key。返回 schemaVersion 2 的查词结果、模型来源和本次耗时诊断。
+请求包含 query 和 config（provider、baseUrl、model、可选 apiKey）。临时 Key 优先；为空时后台寻找对应接口已保存的 Key。
+
+响应是 NDJSON 流：模型边生成边产生 `delta` 事件（`received` 为已累积字符数），最后一条 `result` 事件携带 schemaVersion 2 的完整查词结果、模型来源和本次耗时诊断（含 `firstDeltaMs` 首字到达耗时）。出错时若还没写出首帧就返回对应 HTTP 状态码，否则以一条 `error` 事件结束。上游忽略 stream 直接回 JSON 时，后台同样接受，按单个 delta 处理。
 
 查词外层为 `{schemaVersion:2, query, status, notice, entries}`。query 由本机请求确定，不信任模型回写；status 是 exact / corrected / ambiguous / not_found。exact 有 1–3 条同拼写不同词性的卡，corrected 恰为 1 条更正卡，ambiguous 有 2–3 条不同拼写候选，not_found 没有卡。未识别是 HTTP 200 的业务结果，不是网络错误。
 
 `normalizeLookupResult()` 和 `normalizeEntry()` 使用字段白名单，丢弃模型伪造的来源、耗时及额外字段，再由后台添加可信 source / diagnostics。校验状态、数量、重复和字符串上限，但不能验证法语知识或猜测是否真的符合用户原意。
 
-请求本身不是对话历史。DeepSeek 类型关闭思考，兼容类型省略该专有参数。返回字段错误最多重试一次，远程 HTTP 错误不自动重试。
+请求本身不是对话历史。DeepSeek 类型关闭思考并附带 `stream_options` 统计用量，兼容类型省略这两项专有参数。返回字段错误最多重试一次，远程 HTTP 错误不自动重试；重试会重新产生一轮 delta，前端进度随之归零重来。
 
 纠错与所有候选卡使用同一次模型响应，没有预请求。默认单卡；仅必要时输出多个候选，输出 token 上限 4000。前端只在用户选择候选时展开已经返回的卡，不再请求模型；耗时面板属于整次查询，不属于某个候选。
 
@@ -134,6 +140,8 @@ action 为 status、save 或 delete。save 明确提供 kind、config、apiKey�
 词条和备份仍使用 schemaVersion 1，与新的查词外层版本分开。原形 lemma/ipa 与识别形式 query/queryIpa 分开；纠正后 query 是认可的正确形式，原始错拼仅保留在查词外层的页面内存。partOfSpeech 是枚举；definitions 为中文释义数组；grammar、forms、conjugations、examples、note 组成词卡。
 
 不修改旧词库/备份的字段结构。只有选中词条再主动保存才写入，不把响应外层、其他候选或诊断信息写进生词本。
+
+`notebook.js` 从已保存的 entry.partOfSpeech 派生分组，不新增存储字段、不升级数据库、不额外调用 API。固定分组顺序为名词、动词、形容词、副词、代词、限定词、介词、连词、感叹词、短语，异常值归入其他 / 未分类；仅渲染非空组。文本与词性筛选取交集，文本使用 NFC 和法语小写匹配，保留重音差别。每组按 updatedAt 降序，不修改原记录；页面展示可见数量与总数，清除筛选不会改动数据。
 
 grammar 值为字符串或 null；未知音标等用 null；不适用的词形/变位用空数组。变位必须分别表示 mood 和 tense，不能把语式与时态混成一个字段。
 

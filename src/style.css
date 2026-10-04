@@ -224,9 +224,16 @@ details[open] summary { color: var(--blue); }
 .summary-number { font: 36px / 1 var(--mono); color: var(--blue); }
 .summary-copy { font-size: 16px; line-height: 1.9; }
 .summary-copy small { font-size: 13px; }
-.toolbar { display: flex; align-items: center; gap: 12px; margin: 24px 0; }
-.toolbar input { flex: 1; border: 1px solid var(--line); background: var(--paper); border-radius: 5px; font-size: 15px; padding: 14px 16px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 24px 0 12px; }
+.toolbar input { flex: 1 1 220px; border: 1px solid var(--line); background: var(--paper); border-radius: 5px; font-size: 15px; padding: 14px 16px; }
 .toolbar button { flex: 0 0 auto; font-size: 14px; }
+.notebook-pos-filter { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 14px; }
+.notebook-pos-filter select { border: 1px solid var(--line); border-radius: 5px; background: var(--paper); padding: 13px 10px; font-size: 15px; }
+.notebook-match-count { color: var(--muted); font-size: 13px; margin: 0 0 24px; }
+.notebook-group { margin: 0 0 30px; }
+.notebook-group-heading { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.notebook-group-heading h2 { font-family: inherit; font-size: 20px; font-weight: 700; line-height: 1.5; margin: 0; }
+.notebook-group-heading > span { color: var(--muted); font: 13px var(--mono); }
 .saved-card { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 22px 24px; border: 1px solid var(--line); background: var(--paper); margin-bottom: 10px; border-radius: 5px; }
 .saved-card > div { min-width: 0; }
 .saved-card > div:last-child { display: flex; flex-wrap: wrap; gap: 7px; flex: 0 0 auto; }
@@ -241,6 +248,7 @@ details[open] summary { color: var(--blue); }
 .empty > span { color: var(--blue); font: 40px var(--serif); }
 .empty p { font-size: 17px; }
 .empty small { font-size: 14px; }
+.empty [data-clear-notebook-filters] { display: block; margin: 20px auto 0; }
 
 #settings-view, #tts-settings, #mascot-settings, #data-settings { max-width: 1120px; margin-left: auto; margin-right: auto; }
 #settings-view { padding-top: 26px; }
@@ -388,6 +396,7 @@ input[type="file"]::file-selector-button { font: inherit; color: var(--blue); bo
   .summary-number { font-size: 33px; }
   .toolbar { gap: 8px; }
   .toolbar input { padding: 11px; }
+  .notebook-pos-filter select { padding: 10px; font-size: 14px; }
   .toolbar button { padding: 11px 10px; font-size: 13px; }
   .saved-card { align-items: flex-start; flex-direction: column; padding: 20px; gap: 14px; }
   .saved-title { font-size: 26px; }

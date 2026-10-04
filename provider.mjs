@@ -1,4 +1,5 @@
 import { normalizeLookupResult } from './src/lookup.js';
+import { readSse } from './src/stream.js';
 
 export class LookupError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
@@ -28,7 +29,10 @@ export function validateConfig(config) {
   return { ...config, baseUrl: base.href.replace(/\/+$/, ''), apiKey: config.apiKey.trim(), model: config.model.trim() };
 }
 
-export async function lookupRemote(query, rawConfig, { fetchImpl = fetch, signal } = {}) {
+// Yields { type: 'delta' } while the model writes, then { type: 'result' } once the
+// whole JSON has passed validation. A retry emits { type: 'retry' } and starts over,
+// so callers must not treat the first delta as a usable entry.
+export async function* lookupRemoteStream(query, rawConfig, { fetchImpl = fetch, signal } = {}) {
   if (typeof query !== 'string' || !query.trim() || query.length > 200) throw new LookupError('请输入 1–200 个字符的法语词语。');
   const config = validateConfig(rawConfig);
   const startedAt = performance.now();
@@ -40,7 +44,9 @@ export async function lookupRemote(query, rawConfig, { fetchImpl = fetch, signal
       response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
         method: 'POST', redirect: 'error', signal: requestSignal,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
-        body: JSON.stringify({ model: config.model, messages, stream: false, response_format: { type: 'json_object' }, max_tokens: 4000, ...(config.provider === 'deepseek' ? { thinking: { type: 'disabled' } } : {}) })
+        // stream_options is DeepSeek-specific in the same way thinking is; compatible
+        // services may reject it, so usage accounting stays optional there.
+        body: JSON.stringify({ model: config.model, messages, stream: true, response_format: { type: 'json_object' }, max_tokens: 4000, ...(config.provider === 'deepseek' ? { thinking: { type: 'disabled' }, stream_options: { include_usage: true } } : {}) })
       });
     } catch {
       if (requestSignal.aborted) throw new LookupError('查询已取消或超过 45 秒，请重试。', 504);
@@ -51,26 +57,66 @@ export async function lookupRemote(query, rawConfig, { fetchImpl = fetch, signal
       throw new LookupError(errors[response.status] || '模型服务暂时不可用，请稍后重试。', 502);
     }
     try {
-      const envelope = await response.json();
-      const content = envelope.choices?.[0]?.message?.content;
-      if (envelope.choices?.[0]?.finish_reason === 'length') throw new Error('截断');
+      let content = '';
+      let returnedModel = null;
+      let outputTokens = null;
+      let truncated = false;
+      let firstDeltaMs = null;
+      // A service may ignore stream and answer with a plain JSON body; accept both
+      // rather than failing, since only the assembled text is validated.
+      if (response.body && response.headers?.get?.('content-type')?.includes('text/event-stream')) {
+        for await (const data of readSse(response.body)) {
+          if (data === '[DONE]') break;
+          let event;
+          try { event = JSON.parse(data); } catch { throw new LookupError('模型服务返回的数据格式异常。', 502); }
+          returnedModel ??= typeof event.model === 'string' ? event.model : null;
+          const delta = event.choices?.[0]?.delta?.content;
+          if (typeof delta === 'string' && delta) {
+            firstDeltaMs ??= Math.round(performance.now() - startedAt);
+            content += delta; yield { type: 'delta', text: delta, received: content.length };
+          }
+          if (event.choices?.[0]?.finish_reason === 'length') truncated = true;
+          if (Number.isFinite(event.usage?.completion_tokens)) outputTokens = event.usage.completion_tokens;
+        }
+      } else {
+        const envelope = await response.json();
+        content = envelope.choices?.[0]?.message?.content;
+        returnedModel = typeof envelope.model === 'string' ? envelope.model : null;
+        if (envelope.choices?.[0]?.finish_reason === 'length') truncated = true;
+        if (Number.isFinite(envelope.usage?.completion_tokens)) outputTokens = envelope.usage.completion_tokens;
+        if (typeof content === 'string' && content) yield { type: 'delta', text: content, received: content.length };
+      }
+      if (truncated) throw new Error('截断');
       const result = normalizeLookupResult(JSON.parse(content), query);
       // Query and attribution come from our request, never from generated metadata.
       const source = { kind: 'llm', model: config.model };
-      return {
-        ...result, source, entries: result.entries.map(entry => ({ ...entry, source })),
-        diagnostics: {
-          requestedModel: config.model,
-          returnedModel: typeof envelope.model === 'string' ? envelope.model : null,
-          thinking: config.provider === 'deepseek' ? 'disabled' : 'provider-default',
-          upstreamMs: Math.round(performance.now() - startedAt), attempts: attempt + 1,
-          outputTokens: Number.isFinite(envelope.usage?.completion_tokens) ? envelope.usage.completion_tokens : null
+      yield {
+        type: 'result',
+        result: {
+          ...result, source, entries: result.entries.map(entry => ({ ...entry, source })),
+          diagnostics: {
+            requestedModel: config.model,
+            returnedModel,
+            thinking: config.provider === 'deepseek' ? 'disabled' : 'provider-default',
+            firstDeltaMs,
+            upstreamMs: Math.round(performance.now() - startedAt), attempts: attempt + 1,
+            outputTokens
+          }
         }
       };
+      return;
     } catch (error) {
       if (error instanceof LookupError) throw error;
       if (attempt) throw new LookupError('模型连续两次返回的词条格式不完整，请换词或换模型重试。', 502);
       messages.push({ role: 'user', content: '上次响应无法通过校验。请重新输出 schemaVersion:2 的完整查词结果 JSON，保留 status、notice、entries 及每条词卡全部必需字段，检查状态与候选数量、识别 query 的拼写是否一致，不要输出 Markdown。' });
+      yield { type: 'retry' };
     }
   }
+}
+
+export async function lookupRemote(query, rawConfig, options = {}) {
+  for await (const event of lookupRemoteStream(query, rawConfig, options)) {
+    if (event.type === 'result') return event.result;
+  }
+  throw new LookupError('模型连续两次返回的词条格式不完整，请换词或换模型重试。', 502);
 }
